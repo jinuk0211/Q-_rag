@@ -1,4 +1,11 @@
+
 # Q-_rag
+corag = load_dataset('corag/kilt-corpus')
+arise = './data/wiki/data_s1.json', from retriv sparseretrievern 
+mcts_rag = SearchClinet
+pathrag = .txt
+self-rag = retriever.setup_retriever_demo("facebook/contriever-msmarco", "enwiki_2020_intro_only/enwiki_2020_dec_intro_only.jsonl", "enwiki_2020_intro_only/enwiki_dec_2020_contriever_intro/*",  n_docs=5, save_or_load_index=False)
+
 ```python
 # run_naive_rag.py
 import os

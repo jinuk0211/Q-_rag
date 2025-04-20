@@ -59,3 +59,23 @@ Sub-question:
 {query}
 The original question might be:
 """
+
+#prompts/GPQA/decompose/decompose_prompt.txt
+'''Given a question, please decompose it into sub-questions. For each sub-question, please answer it in one complete sentence, ending with "The answer is ". When the original question is answerable, please start the subquestion with "Now we can answer the question: <original question>".
+
+Question 1: Who was the president in 1980 of the country that has Azad Kashmir?
+Question 1.1: Which country contains Azad Kashmir?
+Answer 1.1: The answer is: Pakistan.
+Question 1.2: Who was the president of Pakistan in 1980?
+Answer 1.2: The answer is: Muhammad Zia-ul-Haq.
+Question 1.3: Now we can answer the question: Who was the president in 1980 of the country that has Azad Kashmir?
+Answer 1.3: The answer is: Muhammad Zia-ul-Haq.'''
+
+#prompts/GPQA/decompose/decompose_template.json
+{
+    "question_prefix": "Question 5: ",
+    "subquestion_prefix": "Question 5.{}:",
+    "overall_question_prefix": "Question 5.{}: Now we can answer the question: {}\n",
+    "answer_prefix": "Answer 5.{}: ",
+    "index": 5
+}

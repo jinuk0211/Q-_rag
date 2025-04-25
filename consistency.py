@@ -1,72 +1,92 @@
-    def _get_most_likely_answer(self, io_output_list: List[str]) -> Tuple[str, float]:
-        assert len(io_output_list) > 0
+import logging
+from typing import List, Dict
+from difflib import SequenceMatcher
 
-        if len(io_output_list) == 1:
-            most_confident_answer_full_completion = io_output_list[0]
-            confidence = 1
-        else:
-            _, most_confident_answer_full_completion, _, confidence = self.evaluator.find_most_confident_answer(
-                io_output_list
+logger = logging.getLogger(__name__)
+
+class AdvancedSelfConsistency:
+    def __init__(self, client, model: str,  num_samples: int = 5, similarity_threshold: float = 0.8):
+        self.client = client
+        self.model = model
+        self.num_samples = num_samples
+        self.similarity_threshold = similarity_threshold
+        self.self_consistency_completion_tokens = 0
+
+    def generate_responses(self, system_prompt: str, user_prompt: str) -> List[str]:
+        responses = []
+        for _ in range(self.num_samples):
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=1,
+                max_tokens=4096
             )
-            assert confidence > 0
+            self.self_consistency_completion_tokens += response.usage.completion_tokens
+            responses.append(response.choices[0].message.content)
+        return responses
 
-        return most_confident_answer_full_completion, confidence
-    def find_most_confident_answer(self, completions: List[str], prior_weights: List[float] = None):
-        """Returns the most confident answer, its completion, its id in the input list, and its confidence."""
-        if completions is None or len(completions) == 0:
-            return None, None, None, None
+    def calculate_similarity(self, a: str, b: str) -> float:
+        return SequenceMatcher(None, a, b).ratio()
 
-        answer2completions = defaultdict(list)
-        answer2ids = defaultdict(list)
-        for id, c in enumerate(completions):
-            try:
-                model_answer = self.extract_answer_from_model_completion(c)
-                has_existed = False
-                for existing_answer in answer2completions.keys():
-                    if self.check_answers_equiv(model_answer, existing_answer):
-                        assert not has_existed
-                        has_existed = True
-                        answer2completions[existing_answer].append(c)
-                        answer2ids[existing_answer].append(id)
-                if not has_existed:
-                    answer2completions[model_answer].append(c)
-                    answer2ids[model_answer].append(id)
-            except:
-                pass
+    def cluster_similar_responses(self, responses: List[str]) -> List[List[str]]:
+        clusters = []
+        for response in responses:
+            added_to_cluster = False
+            for cluster in clusters:
+                if self.calculate_similarity(response, cluster[0]) >= self.similarity_threshold:
+                    cluster.append(response)
+                    added_to_cluster = True
+                    break
+            if not added_to_cluster:
+                clusters.append([response])
+        return clusters
 
-        assert len(answer2completions.keys()) > 0, "There are no valid completions."
-        if prior_weights is not None:
-            assert len(completions) == len(prior_weights)
-            completion2count = {}
-            for answer, answer_completions in answer2completions.items():
-                count = len(answer_completions)
-                for answer_completion in answer_completions:
-                    completion2count[answer_completion] = count
+    def aggregate_results(self, responses: List[str]) -> Dict[str, any]:
+        final_answers = responses
+        clusters = self.cluster_similar_responses(final_answers)
+        
+        cluster_info = []
+        for cluster in clusters:
+            cluster_info.append({
+                "answer": cluster[0],
+                "frequency": len(cluster),
+                "variants": cluster
+            })
+        
+        cluster_info.sort(key=lambda x: x['frequency'], reverse=True)
+        
+        return {
+            "clusters": cluster_info,
+            "total_responses": len(responses),
+            "num_unique_clusters": len(clusters)
+        }
 
-            completion2score = {}
-            for id, (completion, count) in enumerate(completion2count.items()):
-                prior_weight = prior_weights[id]
-                score = prior_weight * (count / len(completions))
-                completion2score[completion] = score
+    def evaluate(self, system_prompt: str, user_prompt: str) -> Dict[str, any]:
+        responses = self.generate_responses(system_prompt, user_prompt)
+        aggregated_result = self.aggregate_results(responses)
+        
+        return {
+            "individual_responses": responses,
+            "aggregated_result": aggregated_result
+        }
 
-            most_confident_completion = max(completion2score.keys(), key=lambda x: completion2score[x])
-
-            return (
-                self.extract_answer_from_model_completion(most_confident_completion),
-                most_confident_completion,
-                completions.index(most_confident_completion),
-                completion2score[most_confident_completion],
-            )
-        else:
-            most_confident_answer = max(answer2completions.keys(), key=lambda x: len(answer2completions[x]))
-            assert (
-                len(answer2completions[most_confident_answer]) > 0
-            ), "There are no completions for the most confident answer."
-            confidence = len(answer2completions[most_confident_answer]) / len(completions)
-            assert confidence > 0
-            return (
-                most_confident_answer,
-                answer2completions[most_confident_answer][0],
-                answer2ids[most_confident_answer][0],
-                confidence,
-            )
+def advanced_self_consistency_approach(system_prompt: str, initial_query: str, client, model: str) -> str:
+    self_consistency = AdvancedSelfConsistency(client, model)
+    result = self_consistency.evaluate(system_prompt, initial_query)
+    
+    logger.info("Advanced Self-Consistency Results:")
+    logger.info(f"Total responses: {result['aggregated_result']['total_responses']}")
+    logger.info(f"Number of unique clusters: {result['aggregated_result']['num_unique_clusters']}")
+    for i, cluster in enumerate(result['aggregated_result']['clusters'], 1):
+        logger.debug(f"\nCluster {i}:")
+        logger.debug(f"  Representative answer: {cluster['answer']}")
+        logger.debug(f"  Frequency: {cluster['frequency']}")
+        logger.debug(f"  Variants: {cluster['variants']}")
+    
+    if result['aggregated_result']['clusters']:
+        return result['aggregated_result']['clusters'][0]['answer'], self_consistency.self_consistency_completion_tokens
+    else:
+        return "No consistent answer found.", self_consistency.self_consistency_completion_tokens
